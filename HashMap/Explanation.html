@@ -1,0 +1,995 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CustomHashMap — How It Works</title>
+    <style>
+        :root{
+            --bg: #0e1116;
+            --panel: #151a21;
+            --panel-2: #1b2129;
+            --line: #262e38;
+            --text: #dbe2ea;
+            --text-dim: #8b97a6;
+            --mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+            --sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+
+            --bucket: #2a3542;
+            --sentinel: #3a4552;
+            --node: #1e3a4a;
+            --node-border: #4fb3d9;
+            --node-new: #1e4a35;
+            --node-new-border: #4fd996;
+            --node-moved: #4a3a1e;
+            --node-moved-border: #d9a94f;
+            --node-stay: #1e3a4a;
+            --arrow: #5b6b7c;
+            --arrow-highlight: #4fd996;
+            --accent: #4fb3d9;
+            --accent-2: #4fd996;
+            --accent-3: #d9a94f;
+            --danger: #d96b6b;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: var(--sans);
+            margin: 0;
+            padding: 0;
+            line-height: 1.6;
+        }
+
+        .wrap {
+            max-width: 980px;
+            margin: 0 auto;
+            padding: 56px 24px 120px;
+        }
+
+        /* ===== Header ===== */
+        header {
+            margin-bottom: 64px;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 40px;
+        }
+        .eyebrow {
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--accent);
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            margin-bottom: 14px;
+        }
+        h1 {
+            font-size: 40px;
+            font-weight: 700;
+            margin: 0 0 16px;
+            letter-spacing: -0.02em;
+            color: #f2f5f8;
+        }
+        h1 .accent { color: var(--accent); }
+        .subtitle {
+            font-size: 17px;
+            color: var(--text-dim);
+            max-width: 640px;
+        }
+
+        /* ===== Section ===== */
+        section { margin-bottom: 76px; }
+        .section-label {
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--text-dim);
+            letter-spacing: 0.1em;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .section-label::before {
+            content: '';
+            width: 18px;
+            height: 1px;
+            background: var(--line);
+        }
+        h2 {
+            font-size: 26px;
+            font-weight: 700;
+            margin: 0 0 14px;
+            color: #f2f5f8;
+            letter-spacing: -0.01em;
+        }
+        h3 {
+            font-size: 17px;
+            font-weight: 600;
+            margin: 28px 0 10px;
+            color: #e4e9ef;
+        }
+        p { color: var(--text-dim); margin: 0 0 14px; font-size: 15.5px; }
+        p strong { color: var(--text); font-weight: 600; }
+        code {
+            font-family: var(--mono);
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            padding: 1px 6px;
+            border-radius: 4px;
+            font-size: 0.88em;
+            color: var(--accent);
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 28px;
+        }
+
+        /* ===== Code block ===== */
+        .code-block {
+            background: #0a0d11;
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 18px 20px;
+            font-family: var(--mono);
+            font-size: 13.5px;
+            color: #b8c4d1;
+            overflow-x: auto;
+            margin: 16px 0;
+            white-space: pre;
+        }
+        .code-block .kw { color: #d9a94f; }
+        .code-block .type { color: #4fb3d9; }
+        .code-block .cm { color: #5b6b7c; font-style: italic; }
+        .code-block .str { color: #4fd996; }
+
+        /* ===== SVG container ===== */
+        .fig {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 12px;
+            padding: 24px;
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+        .fig svg { display: block; margin: 0 auto; max-width: 100%; height: auto; }
+        .fig-caption {
+            font-family: var(--mono);
+            font-size: 12.5px;
+            color: var(--text-dim);
+            text-align: center;
+            margin-top: 14px;
+            padding-top: 14px;
+            border-top: 1px dashed var(--line);
+        }
+
+        /* ===== Legend ===== */
+        .legend {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 18px;
+            padding: 14px 18px;
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            margin: 16px 0 24px;
+            font-family: var(--mono);
+            font-size: 12.5px;
+        }
+        .legend-item { display: flex; align-items: center; gap: 8px; color: var(--text-dim); }
+        .swatch { width: 14px; height: 14px; border-radius: 3px; flex-shrink: 0; border: 1.5px solid; }
+
+        /* ===== Step list ===== */
+        .steps {
+            display: flex;
+            flex-direction: column;
+            gap: 0;
+            counter-reset: step;
+        }
+        .step {
+            display: grid;
+            grid-template-columns: 40px 1fr;
+            gap: 16px;
+            padding: 18px 0;
+            border-bottom: 1px solid var(--line);
+        }
+        .step:last-child { border-bottom: none; }
+        .step-num {
+            counter-increment: step;
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--accent);
+            background: var(--panel-2);
+            border: 1px solid var(--line);
+            width: 32px;
+            height: 32px;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 600;
+        }
+        .step-num::before { content: counter(step); }
+        .step-body h4 {
+            margin: 4px 0 4px;
+            font-size: 15px;
+            color: var(--text);
+            font-weight: 600;
+        }
+        .step-body p { margin-bottom: 4px; font-size: 14.5px; }
+
+        /* ===== Two column ===== */
+        .two-col {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+        }
+        @media (max-width: 720px) {
+            .two-col { grid-template-columns: 1fr; }
+        }
+
+        /* ===== Bug callout ===== */
+        .callout {
+            border-left: 3px solid var(--accent-3);
+            background: rgba(217, 169, 79, 0.07);
+            border-radius: 0 8px 8px 0;
+            padding: 16px 20px;
+            margin: 18px 0;
+        }
+        .callout.danger { border-left-color: var(--danger); background: rgba(217, 107, 107, 0.07); }
+        .callout.info { border-left-color: var(--accent); background: rgba(79, 179, 217, 0.07); }
+        .callout .tag {
+            font-family: var(--mono);
+            font-size: 11px;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--accent-3);
+            font-weight: 700;
+            margin-bottom: 6px;
+            display: block;
+        }
+        .callout.danger .tag { color: var(--danger); }
+        .callout.info .tag { color: var(--accent); }
+        .callout p { margin-bottom: 6px; color: var(--text); font-size: 14.5px; }
+        .callout p:last-child { margin-bottom: 0; }
+
+        /* ===== Table ===== */
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 14px;
+            margin: 16px 0;
+        }
+        th, td {
+            text-align: left;
+            padding: 10px 14px;
+            border-bottom: 1px solid var(--line);
+        }
+        th {
+            font-family: var(--mono);
+            font-size: 11.5px;
+            text-transform: uppercase;
+            letter-spacing: 0.05em;
+            color: var(--text-dim);
+            font-weight: 600;
+        }
+        td { color: var(--text); }
+        td.mono, th.mono { font-family: var(--mono); font-size: 13px; }
+        tr:last-child td { border-bottom: none; }
+
+        /* ===== TOC ===== */
+        .toc {
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            gap: 10px;
+            margin-top: 28px;
+        }
+        @media (max-width: 640px) { .toc { grid-template-columns: 1fr; } }
+        .toc a {
+            display: block;
+            padding: 12px 16px;
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            color: var(--text);
+            text-decoration: none;
+            font-size: 13.5px;
+            font-family: var(--mono);
+            transition: border-color 0.15s, transform 0.15s;
+        }
+        .toc a:hover { border-color: var(--accent); transform: translateX(2px); }
+        .toc a::before { content: '→ '; color: var(--accent); }
+
+        footer {
+            margin-top: 80px;
+            padding-top: 24px;
+            border-top: 1px solid var(--line);
+            color: var(--text-dim);
+            font-size: 13px;
+            font-family: var(--mono);
+        }
+    </style>
+</head>
+<body>
+<div class="wrap">
+
+    <header>
+        <div class="eyebrow">Data Structures &middot; Visual Walkthrough</div>
+        <h1><span class="accent">CustomHashMap</span> — Inside the Bucket Array</h1>
+        <p class="subtitle">
+            A visual trace through your Java implementation: how sentinel-headed doubly linked
+            lists form each bucket, how <code>put</code> / <code>get</code> / <code>remove</code>
+            walk that structure, and exactly what happens, node by node, during <code>rehash</code>.
+        </p>
+
+        <nav class="toc">
+            <a href="#structure">1. The bucket layout</a>
+            <a href="#construction">2. Constructor: building sentinels</a>
+            <a href="#put">3. put() — insert &amp; collision</a>
+            <a href="#getfind">4. get() / findNode()</a>
+            <a href="#remove">5. remove()</a>
+            <a href="#rehash">6. rehash() — full trace</a>
+            <a href="#issues">7. Bugs worth knowing about</a>
+        </nav>
+    </header>
+
+    <!-- ================= SECTION 1: STRUCTURE ================= -->
+    <section id="structure">
+        <div class="section-label">01 · Foundation</div>
+        <h2>The overall shape</h2>
+        <p>
+            <code>map</code> is a plain Java array of <code>Node</code> references — <strong>separate
+            chaining</strong>. What makes this implementation different from a textbook version is that
+            every bucket is not just a linked list — it's a <strong>doubly linked list with two permanent
+            sentinel nodes</strong>: a <strong>head</strong> (<code>key = null</code>) and a
+            <strong>tail</strong> (<code>key = null</code>) that never move and never hold real data.
+            Real entries are always inserted between the head and whatever came after it.
+        </p>
+
+        <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:var(--sentinel);border-color:#5b6b7c"></span> sentinel (head/tail, key = null)</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--node);border-color:var(--node-border)"></span> real entry node</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--node-new);border-color:var(--node-new-border)"></span> newly inserted node</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--node-moved);border-color:var(--node-moved-border)"></span> node being relinked</div>
+        </div>
+
+        <div class="fig">
+            <svg viewBox="0 0 900 260" xmlns="http://www.w3.org/2000/svg">
+                <!-- bucket array box -->
+                <text x="20" y="28" fill="#8b97a6" font-family="monospace" font-size="13">map[] — array of 4 bucket entry points</text>
+
+                <!-- 4 bucket rows -->
+                <!-- bucket 0 -->
+                <g>
+                    <rect x="20" y="50" width="46" height="34" rx="6" fill="#1b2129" stroke="#262e38"/>
+                    <text x="43" y="71" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="12">[0]</text>
+                    <line x1="66" y1="67" x2="96" y2="67" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="98" y="50" width="70" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="133" y="71" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">HEAD</text>
+                    <line x1="168" y1="60" x2="198" y2="60" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="198" y1="74" x2="168" y2="74" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="200" y="50" width="70" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="235" y="71" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">TAIL</text>
+                </g>
+                <!-- bucket 1 (with 2 real nodes) -->
+                <g>
+                    <rect x="20" y="100" width="46" height="34" rx="6" fill="#1b2129" stroke="#262e38"/>
+                    <text x="43" y="121" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="12">[1]</text>
+                    <line x1="66" y1="117" x2="96" y2="117" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="98" y="100" width="60" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="128" y="121" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">HEAD</text>
+                    <line x1="158" y1="110" x2="186" y2="110" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="186" y1="124" x2="158" y2="124" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="188" y="100" width="70" height="34" rx="6" fill="#1e3a4a" stroke="#4fb3d9"/>
+                    <text x="223" y="117" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"age"</text>
+                    <text x="223" y="129" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="9">val=30</text>
+                    <line x1="258" y1="110" x2="286" y2="110" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="286" y1="124" x2="258" y2="124" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="288" y="100" width="60" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="318" y="121" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">TAIL</text>
+                </g>
+                <!-- bucket 2 empty -->
+                <g>
+                    <rect x="20" y="150" width="46" height="34" rx="6" fill="#1b2129" stroke="#262e38"/>
+                    <text x="43" y="171" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="12">[2]</text>
+                    <line x1="66" y1="167" x2="96" y2="167" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="98" y="150" width="60" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="128" y="171" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">HEAD</text>
+                    <line x1="158" y1="160" x2="186" y2="160" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="186" y1="174" x2="158" y2="174" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="188" y="150" width="60" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="218" y="171" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">TAIL</text>
+                </g>
+                <!-- bucket 3 with 3 nodes chain -->
+                <g>
+                    <rect x="20" y="200" width="46" height="34" rx="6" fill="#1b2129" stroke="#262e38"/>
+                    <text x="43" y="221" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="12">[3]</text>
+                    <line x1="66" y1="217" x2="96" y2="217" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="98" y="200" width="55" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="125" y="221" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">HEAD</text>
+                    <line x1="153" y1="210" x2="178" y2="210" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="178" y1="224" x2="153" y2="224" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="180" y="200" width="60" height="34" rx="6" fill="#1e3a4a" stroke="#4fb3d9"/>
+                    <text x="210" y="217" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">"id"</text>
+                    <text x="210" y="229" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="9">val=7</text>
+                    <line x1="240" y1="210" x2="265" y2="210" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="265" y1="224" x2="240" y2="224" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="267" y="200" width="65" height="34" rx="6" fill="#1e3a4a" stroke="#4fb3d9"/>
+                    <text x="299" y="217" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">"city"</text>
+                    <text x="299" y="229" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="9">val="LA"</text>
+                    <line x1="332" y1="210" x2="357" y2="210" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="357" y1="224" x2="332" y2="224" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="359" y="200" width="68" height="34" rx="6" fill="#1e3a4a" stroke="#4fb3d9"/>
+                    <text x="393" y="217" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">"name"</text>
+                    <text x="393" y="229" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="9">val="Jo"</text>
+                    <line x1="427" y1="210" x2="452" y2="210" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <line x1="452" y1="224" x2="427" y2="224" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#arrow)"/>
+                    <rect x="454" y="200" width="55" height="34" rx="6" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="481" y="221" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">TAIL</text>
+                </g>
+
+                <text x="600" y="120" fill="#8b97a6" font-family="monospace" font-size="12" text-anchor="start">Bucket 3 has a real</text>
+                <text x="600" y="138" fill="#8b97a6" font-family="monospace" font-size="12" text-anchor="start">collision — 3 keys hash</text>
+                <text x="600" y="156" fill="#8b97a6" font-family="monospace" font-size="12" text-anchor="start">to the same index and</text>
+                <text x="600" y="174" fill="#8b97a6" font-family="monospace" font-size="12" text-anchor="start">form one chain →</text>
+
+                <defs>
+                    <marker id="arrow" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                        <path d="M0,0 L6,3 L0,6 Z" fill="#5b6b7c"/>
+                    </marker>
+                </defs>
+            </svg>
+            <div class="fig-caption">map.length = 4 · each bucket = HEAD ⇄ [real nodes...] ⇄ TAIL · double-headed arrows = prev/next links</div>
+        </div>
+
+        <div class="callout info">
+            <span class="tag">Why sentinels?</span>
+            <p>
+                Using dummy head/tail nodes means <code>put</code> and <code>remove</code> never have to
+                special-case "is this the first node in the bucket?" or "is this the last one?" —
+                <code>head.next</code> and <code>tail.prev</code> always exist, so every insert/delete is a
+                uniform 4-pointer rewire. This is the classic sentinel-node trick from doubly linked list design.
+            </p>
+        </div>
+    </section>
+
+    <!-- ================= SECTION 2: CONSTRUCTOR ================= -->
+    <section id="construction">
+        <div class="section-label">02 · Setup</div>
+        <h2>Constructor — wiring up empty buckets</h2>
+        <div class="code-block"><span class="kw">CustomHashMap</span>(){
+            map = <span class="kw">new</span> <span class="type">Node</span>[INITIAL_SIZE]; <span class="cm">// array of 4 nulls</span>
+            <span class="kw">for</span>(<span class="kw">int</span> i=0; i&lt;INITIAL_SIZE; i++){
+            map[i] = <span class="kw">new</span> <span class="type">Node</span>&lt;&gt;(<span class="kw">null</span>, <span class="kw">null</span>);      <span class="cm">// this bucket's HEAD sentinel</span>
+            map[i].next = <span class="kw">new</span> <span class="type">Node</span>&lt;&gt;(<span class="kw">null</span>, <span class="kw">null</span>); <span class="cm">// this bucket's TAIL sentinel</span>
+            map[i].next.prev = map[i];             <span class="cm">// link them back to each other</span>
+            }
+            }</div>
+        <p>For every index <code>0..3</code>, two throwaway <code>Node</code> objects are created and
+            wired together: <code>HEAD.next = TAIL</code> and <code>TAIL.prev = HEAD</code>. Nothing else
+            points at <code>HEAD</code> or <code>TAIL</code> from outside — they exist purely as anchors.</p>
+
+        <div class="fig">
+            <svg viewBox="0 0 500 100" xmlns="http://www.w3.org/2000/svg">
+                <rect x="20" y="30" width="80" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="60" y="46" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="12">HEAD</text>
+                <text x="60" y="60" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="9">key=null</text>
+
+                <line x1="100" y1="42" x2="150" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#arrow2)"/>
+                <text x="125" y="34" text-anchor="middle" fill="#4fd996" font-family="monospace" font-size="10">.next</text>
+
+                <line x1="150" y1="58" x2="100" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#arrow2)"/>
+                <text x="125" y="76" text-anchor="middle" fill="#d9a94f" font-family="monospace" font-size="10">.prev</text>
+
+                <rect x="150" y="30" width="80" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="190" y="46" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="12">TAIL</text>
+                <text x="190" y="60" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="9">key=null</text>
+
+                <defs>
+                    <marker id="arrow2" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto">
+                        <path d="M0,0 L6,3 L0,6 Z" fill="context-fill"/>
+                    </marker>
+                </defs>
+                <text x="320" y="40" fill="#8b97a6" font-family="monospace" font-size="12">Starting state</text>
+                <text x="320" y="58" fill="#8b97a6" font-family="monospace" font-size="12">of every one of</text>
+                <text x="320" y="76" fill="#8b97a6" font-family="monospace" font-size="12">the 4 buckets</text>
+            </svg>
+            <div class="fig-caption">Repeated identically for map[0], map[1], map[2], map[3]</div>
+        </div>
+    </section>
+
+    <!-- ================= SECTION 3: PUT ================= -->
+    <section id="put">
+        <div class="section-label">03 · Insertion</div>
+        <h2>put(key, value) — trace with real collisions</h2>
+        <p>
+            We'll insert <code>"name"</code>, <code>"age"</code>, <code>"city"</code>, then
+            <code>"id"</code> — using real Java <code>String.hashCode()</code> values so the buckets
+            below are accurate, not illustrative:
+        </p>
+
+        <table>
+            <tr><th>key</th><th class="mono">hashCode()</th><th class="mono">Math.abs(h) % 4</th></tr>
+            <tr><td><code>"name"</code></td><td class="mono">3373707</td><td class="mono">3</td></tr>
+            <tr><td><code>"age"</code></td><td class="mono">96511</td><td class="mono">3</td></tr>
+            <tr><td><code>"city"</code></td><td class="mono">3053931</td><td class="mono">3</td></tr>
+            <tr><td><code>"id"</code></td><td class="mono">3355</td><td class="mono">3</td></tr>
+        </table>
+        <p>All four collide into <strong>bucket 3</strong> — a genuine worst-case chain, which is
+            exactly what makes this a good example of the linked-list-per-bucket design.</p>
+
+        <div class="code-block"><span class="kw">public void</span> put(K key, V value){
+            <span class="type">Node</span> node = findNode(key);
+            <span class="kw">if</span>(node != <span class="kw">null</span>){ node.val = value; <span class="kw">return</span>; } <span class="cm">// key exists → overwrite</span>
+
+            <span class="kw">int</span> bucket = Math.abs(key.hashCode()) % map.length;
+            <span class="type">Node</span> head = map[bucket];
+            <span class="type">Node</span> newNode = <span class="kw">new</span> <span class="type">Node</span>(key, value);
+            <span class="type">Node</span> old_first = head.next;   <span class="cm">// whoever was right after HEAD</span>
+            head.next = newNode;         newNode.prev = head;
+            newNode.next = old_first;    old_first.prev = newNode;
+            countOfNodes++;
+            <span class="kw">if</span>(countOfNodes &gt; LOAD_FACTOR * map.length) rehash(map.length * 2);
+            }</div>
+
+        <p>New nodes are always spliced in <strong>right after HEAD</strong> — this is a
+            <strong>LIFO / most-recently-inserted-first</strong> ordering within a bucket, not append-to-end.</p>
+
+        <h3>Step 1 — put("name", "Jo") into empty bucket 3</h3>
+        <div class="fig">
+            <svg viewBox="0 0 560 100" xmlns="http://www.w3.org/2000/svg">
+                <rect x="20" y="30" width="60" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="50" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">HEAD</text>
+                <line x1="80" y1="42" x2="118" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a3)"/>
+                <line x1="118" y1="58" x2="80" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a3)"/>
+                <rect x="120" y="26" width="90" height="48" rx="8" fill="#1e4a35" stroke="#4fd996" stroke-width="2"/>
+                <text x="165" y="46" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">"name"</text>
+                <text x="165" y="60" text-anchor="middle" fill="#a8e6c4" font-family="monospace" font-size="9">val="Jo"  ← new</text>
+                <line x1="210" y1="42" x2="248" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a3)"/>
+                <line x1="248" y1="58" x2="210" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a3)"/>
+                <rect x="250" y="30" width="60" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="280" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">TAIL</text>
+                <text x="360" y="46" fill="#8b97a6" font-family="monospace" font-size="12">old_first was TAIL,</text>
+                <text x="360" y="64" fill="#8b97a6" font-family="monospace" font-size="12">now sits after "name"</text>
+                <defs><marker id="a3" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="context-fill"/></marker></defs>
+            </svg>
+            <div class="fig-caption">bucket[3]: HEAD ⇄ "name" ⇄ TAIL</div>
+        </div>
+
+        <h3>Step 2 — put("age", 30): bucket 3 collides, insert at head</h3>
+        <div class="fig">
+            <svg viewBox="0 0 620 100" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="30" width="55" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="37" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">HEAD</text>
+                <line x1="65" y1="42" x2="100" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a4)"/>
+                <line x1="100" y1="58" x2="65" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a4)"/>
+                <rect x="102" y="26" width="85" height="48" rx="8" fill="#1e4a35" stroke="#4fd996" stroke-width="2"/>
+                <text x="144" y="46" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">"age"</text>
+                <text x="144" y="60" text-anchor="middle" fill="#a8e6c4" font-family="monospace" font-size="9">val=30 ← new</text>
+                <line x1="187" y1="42" x2="222" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a4)"/>
+                <line x1="222" y1="58" x2="187" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a4)"/>
+                <rect x="224" y="30" width="80" height="40" rx="8" fill="#1e3a4a" stroke="#4fb3d9" stroke-width="1.5"/>
+                <text x="264" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">"name"</text>
+                <line x1="304" y1="42" x2="339" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a4)"/>
+                <line x1="339" y1="58" x2="304" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a4)"/>
+                <rect x="341" y="30" width="55" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="368" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">TAIL</text>
+                <text x="430" y="46" fill="#8b97a6" font-family="monospace" font-size="12">"age" hashes to bucket 3 too —</text>
+                <text x="430" y="64" fill="#8b97a6" font-family="monospace" font-size="12">inserted before "name", not after</text>
+                <defs><marker id="a4" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="context-fill"/></marker></defs>
+            </svg>
+            <div class="fig-caption">bucket[3]: HEAD ⇄ "age" ⇄ "name" ⇄ TAIL — newest is always closest to HEAD</div>
+        </div>
+
+        <h3>Step 3 — put("city", "LA"): three real nodes now chained</h3>
+        <div class="fig">
+            <svg viewBox="0 0 660 100" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="30" width="50" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="35" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">HEAD</text>
+                <line x1="60" y1="42" x2="92" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a5)"/>
+                <line x1="92" y1="58" x2="60" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a5)"/>
+                <rect x="94" y="26" width="80" height="48" rx="8" fill="#1e4a35" stroke="#4fd996" stroke-width="2"/>
+                <text x="134" y="46" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"city"</text>
+                <text x="134" y="60" text-anchor="middle" fill="#a8e6c4" font-family="monospace" font-size="9">← new</text>
+                <line x1="174" y1="42" x2="206" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a5)"/>
+                <line x1="206" y1="58" x2="174" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a5)"/>
+                <rect x="208" y="30" width="70" height="40" rx="8" fill="#1e3a4a" stroke="#4fb3d9" stroke-width="1.5"/>
+                <text x="243" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"age"</text>
+                <line x1="278" y1="42" x2="310" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a5)"/>
+                <line x1="310" y1="58" x2="278" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a5)"/>
+                <rect x="312" y="30" width="75" height="40" rx="8" fill="#1e3a4a" stroke="#4fb3d9" stroke-width="1.5"/>
+                <text x="349" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"name"</text>
+                <line x1="387" y1="42" x2="419" y2="42" stroke="#4fd996" stroke-width="2" marker-end="url(#a5)"/>
+                <line x1="419" y1="58" x2="387" y2="58" stroke="#d9a94f" stroke-width="2" marker-end="url(#a5)"/>
+                <rect x="421" y="30" width="50" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="446" y="54" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">TAIL</text>
+                <text x="510" y="46" fill="#8b97a6" font-family="monospace" font-size="12">countOfNodes = 3</text>
+                <text x="510" y="64" fill="#8b97a6" font-family="monospace" font-size="12">3 &gt; 0.75×4? No → no rehash yet</text>
+                <defs><marker id="a5" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="context-fill"/></marker></defs>
+            </svg>
+            <div class="fig-caption">bucket[3]: HEAD ⇄ "city" ⇄ "age" ⇄ "name" ⇄ TAIL</div>
+        </div>
+
+        <div class="callout">
+            <span class="tag">Then put("id", 7) hits the same bucket</span>
+            <p>
+                That's the <strong>4th</strong> node overall. <code>countOfNodes</code> becomes 4, and
+                <code>4 &gt; LOAD_FACTOR * map.length</code> → <code>4 &gt; 0.75 × 4 = 3</code> is
+                <strong>true</strong>. This single insert both extends the chain to 4 nodes <em>and</em>
+                immediately fires <code>rehash(8)</code> before <code>put</code> returns. We'll pick this
+                up in the rehash section below.
+            </p>
+        </div>
+    </section>
+
+    <!-- ================= SECTION 4: GET/FIND ================= -->
+    <section id="getfind">
+        <div class="section-label">04 · Lookup</div>
+        <h2>findNode() and get()</h2>
+        <div class="code-block"><span class="kw">public</span> <span class="type">Node</span> findNode(K key){
+            <span class="kw">int</span> bucket = Math.abs(key.hashCode()) % map.length;
+            <span class="type">Node</span> head = map[bucket];
+            <span class="kw">while</span>(head != <span class="kw">null</span>){
+            <span class="kw">if</span>(head.key != <span class="kw">null</span> &amp;&amp; head.key.equals(key)) <span class="kw">return</span> head;
+            head = head.next;
+            }
+            <span class="kw">return null</span>;
+            }</div>
+        <p>
+            This walks forward from the HEAD sentinel through every node — including eventually the
+            TAIL sentinel — comparing keys. Because <code>head.key != null</code> guards the
+            sentinels, they're silently skipped rather than matched.
+        </p>
+
+        <div class="fig">
+            <svg viewBox="0 0 660 110" xmlns="http://www.w3.org/2000/svg">
+                <rect x="10" y="35" width="50" height="40" rx="8" fill="#3a4552" stroke="#5b6b7c" stroke-width="1.5"/>
+                <text x="35" y="59" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">HEAD</text>
+                <line x1="60" y1="55" x2="92" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a6)"/>
+                <rect x="94" y="31" width="80" height="48" rx="8" fill="#1e3a4a" stroke="#4fb3d9" stroke-width="1.5"/>
+                <text x="134" y="51" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"city"</text>
+                <text x="134" y="65" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="8">≠ "name" ✗</text>
+                <line x1="174" y1="55" x2="206" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a6)"/>
+                <rect x="208" y="31" width="70" height="48" rx="8" fill="#1e3a4a" stroke="#4fb3d9" stroke-width="1.5"/>
+                <text x="243" y="51" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"age"</text>
+                <text x="243" y="65" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="8">≠ "name" ✗</text>
+                <line x1="278" y1="55" x2="310" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a6)"/>
+                <rect x="312" y="27" width="80" height="56" rx="8" fill="#1e4a35" stroke="#4fd996" stroke-width="2.5"/>
+                <text x="352" y="49" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"name"</text>
+                <text x="352" y="63" text-anchor="middle" fill="#a8e6c4" font-family="monospace" font-size="8">== "name" ✓</text>
+                <text x="352" y="75" text-anchor="middle" fill="#a8e6c4" font-family="monospace" font-size="8">return this node</text>
+                <line x1="392" y1="55" x2="424" y2="55" stroke="#262e38" stroke-width="1.5" stroke-dasharray="3,3"/>
+                <rect x="426" y="35" width="50" height="40" rx="8" fill="#262e38" stroke="#3a4552" stroke-width="1.5" opacity="0.4"/>
+                <text x="451" y="59" text-anchor="middle" fill="#5b6b7c" font-family="monospace" font-size="9">TAIL</text>
+                <text x="490" y="50" fill="#5b6b7c" font-family="monospace" font-size="11">never</text>
+                <text x="490" y="65" fill="#5b6b7c" font-family="monospace" font-size="11">reached</text>
+                <defs><marker id="a6" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b6b7c"/></marker></defs>
+            </svg>
+            <div class="fig-caption">findNode("name") — linear scan stops the moment key.equals(key) matches</div>
+        </div>
+
+        <p><code>get(key)</code> is a one-line wrapper: call <code>findNode</code>, return
+            <code>node.val</code> if found, else <code>null</code>. Worst case for a lookup is O(chain
+            length) — which is exactly why <code>rehash</code> exists: keep chains short as the map grows.</p>
+    </section>
+
+    <!-- ================= SECTION 5: REMOVE ================= -->
+    <section id="remove">
+        <div class="section-label">05 · Deletion</div>
+        <h2>remove(key) — 4-pointer splice</h2>
+        <div class="code-block"><span class="kw">public void</span> remove(K key){
+            <span class="type">Node</span> nodeToRemove = findNode(key);
+            <span class="kw">if</span>(nodeToRemove == <span class="kw">null</span>) <span class="kw">return</span>;
+            <span class="type">Node</span> prevNode = nodeToRemove.prev;
+            <span class="type">Node</span> nextNode = nodeToRemove.next;
+            prevNode.next = nextNode;
+            nextNode.prev = prevNode;
+            countOfNodes--;
+            }</div>
+        <p>Removing <code>"age"</code> from the 3-node chain above — its neighbors just reach around it:</p>
+
+        <div class="fig">
+            <svg viewBox="0 0 620 130" xmlns="http://www.w3.org/2000/svg">
+                <!-- before -->
+                <text x="10" y="20" fill="#8b97a6" font-family="monospace" font-size="11">before:</text>
+                <rect x="10" y="30" width="50" height="34" rx="7" fill="#3a4552" stroke="#5b6b7c"/>
+                <text x="35" y="51" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">HEAD</text>
+                <line x1="60" y1="47" x2="88" y2="47" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a7)"/>
+                <rect x="90" y="30" width="70" height="34" rx="7" fill="#1e3a4a" stroke="#4fb3d9"/>
+                <text x="125" y="51" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"city"</text>
+                <line x1="160" y1="47" x2="188" y2="47" stroke="#d96b6b" stroke-width="2" marker-end="url(#a7r)"/>
+                <rect x="190" y="26" width="70" height="42" rx="7" fill="#4a2a2a" stroke="#d96b6b" stroke-width="2"/>
+                <text x="225" y="51" text-anchor="middle" fill="#f0b8b8" font-family="monospace" font-size="10">"age" ✕</text>
+                <line x1="260" y1="47" x2="288" y2="47" stroke="#d96b6b" stroke-width="2" marker-end="url(#a7r)"/>
+                <rect x="290" y="30" width="75" height="34" rx="7" fill="#1e3a4a" stroke="#4fb3d9"/>
+                <text x="327" y="51" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"name"</text>
+                <line x1="365" y1="47" x2="393" y2="47" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a7)"/>
+                <rect x="395" y="30" width="50" height="34" rx="7" fill="#3a4552" stroke="#5b6b7c"/>
+                <text x="420" y="51" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">TAIL</text>
+
+                <!-- after -->
+                <text x="10" y="92" fill="#8b97a6" font-family="monospace" font-size="11">after:</text>
+                <rect x="10" y="100" width="50" height="34" rx="7" fill="#3a4552" stroke="#5b6b7c"/>
+                <text x="35" y="121" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">HEAD</text>
+                <line x1="60" y1="112" x2="88" y2="112" stroke="#4fd996" stroke-width="2" marker-end="url(#a7g)"/>
+                <line x1="88" y1="126" x2="60" y2="126" stroke="#4fd996" stroke-width="2" marker-end="url(#a7g)"/>
+                <rect x="90" y="100" width="70" height="34" rx="7" fill="#1e3a4a" stroke="#4fb3d9"/>
+                <text x="125" y="121" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"city"</text>
+                <line x1="160" y1="112" x2="188" y2="112" stroke="#4fd996" stroke-width="2" marker-end="url(#a7g)"/>
+                <line x1="188" y1="126" x2="160" y2="126" stroke="#4fd996" stroke-width="2" marker-end="url(#a7g)"/>
+                <rect x="190" y="100" width="75" height="34" rx="7" fill="#1e3a4a" stroke="#4fb3d9"/>
+                <text x="227" y="121" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="10">"name"</text>
+                <line x1="265" y1="112" x2="293" y2="112" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a7)"/>
+                <rect x="295" y="100" width="50" height="34" rx="7" fill="#3a4552" stroke="#5b6b7c"/>
+                <text x="320" y="121" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">TAIL</text>
+                <text x="420" y="115" fill="#4fd996" font-family="monospace" font-size="11">"age" node is now</text>
+                <text x="420" y="130" fill="#4fd996" font-family="monospace" font-size="11">unreachable → GC'd</text>
+
+                <defs>
+                    <marker id="a7" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b6b7c"/></marker>
+                    <marker id="a7r" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#d96b6b"/></marker>
+                    <marker id="a7g" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#4fd996"/></marker>
+                </defs>
+            </svg>
+            <div class="fig-caption">prevNode.next skips forward, nextNode.prev skips backward — "age" drops out of both directions</div>
+        </div>
+    </section>
+
+    <!-- ================= SECTION 6: REHASH ================= -->
+    <section id="rehash">
+        <div class="section-label">06 · Resizing</div>
+        <h2>rehash() — the full trace that put("id", 7) triggers</h2>
+        <p>Continuing the exact example from Section 3: bucket 3 holds
+            <code>HEAD ⇄ "city" ⇄ "age" ⇄ "name" ⇄ TAIL</code> and we now insert <code>"id"</code>,
+            which also hashes to bucket 3.</p>
+
+        <div class="steps">
+            <div class="step">
+                <div class="step-num"></div>
+                <div class="step-body">
+                    <h4>countOfNodes crosses the threshold</h4>
+                    <p>"id" is inserted the normal way first (bucket 3 becomes a 4-chain), then
+                        <code>countOfNodes</code> becomes <code>4</code>. Check: <code>4 &gt; 0.75 × 4 (=3)</code>
+                        → true. <code>rehash(map.length * 2)</code> → <code>rehash(8)</code> is called.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num"></div>
+                <div class="step-body">
+                    <h4>A brand new array is allocated</h4>
+                    <p><code>Node[] newMap = new Node[8]</code>, and all 8 buckets get fresh HEAD/TAIL
+                        sentinel pairs — identical setup to the constructor, just at the new size.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num"></div>
+                <div class="step-body">
+                    <h4>Every old bucket is walked</h4>
+                    <p>The outer loop <code>for(Node curr : map)</code> visits each of the 4 old bucket
+                        <em>HEAD</em> sentinels in turn. The inner <code>while(curr != null)</code> walks that
+                        bucket's whole chain — sentinels included.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num"></div>
+                <div class="step-body">
+                    <h4>Sentinels are skipped, not recreated</h4>
+                    <p><code>if(curr.key == null){ curr = curr.next; continue; }</code> — the <em>old</em>
+                        HEAD/TAIL objects are simply stepped over. Only real key/value nodes get relinked.</p>
+                </div>
+            </div>
+            <div class="step">
+                <div class="step-num"></div>
+                <div class="step-body">
+                    <h4>Each real node is re-bucketed and spliced into the new array</h4>
+                    <p>For each real node, <code>bucket = Math.abs(curr.key.hashCode()) % newSize</code> is
+                        recomputed against the new size (8, not 4) — so nodes can land in a completely
+                        different bucket than before. It's then linked in right after the new bucket's HEAD,
+                        same LIFO-style insert as <code>put</code> uses.</p>
+                </div>
+            </div>
+        </div>
+
+        <h3>Recomputed buckets at size 8</h3>
+        <table>
+            <tr><th>key</th><th class="mono">hashCode()</th><th class="mono">old: h % 4</th><th class="mono">new: h % 8</th></tr>
+            <tr><td><code>"city"</code></td><td class="mono">3053931</td><td class="mono">3</td><td class="mono">3</td></tr>
+            <tr><td><code>"age"</code></td><td class="mono">96511</td><td class="mono">3</td><td class="mono" style="color:var(--accent-3)">7</td></tr>
+            <tr><td><code>"name"</code></td><td class="mono">3373707</td><td class="mono">3</td><td class="mono">3</td></tr>
+            <tr><td><code>"id"</code></td><td class="mono">3355</td><td class="mono">3</td><td class="mono">3</td></tr>
+        </table>
+        <p>This is the payoff of rehashing: three of the four keys stay together in the new bucket 3,
+            but <strong>"age" moves out to bucket 7</strong> — the 4-long chain splits into a 3-chain and
+            a 1-chain, which is exactly the point of growing the table.</p>
+
+        <div class="legend">
+            <div class="legend-item"><span class="swatch" style="background:var(--node-stay);border-color:var(--node-border)"></span> stays in same relative bucket</div>
+            <div class="legend-item"><span class="swatch" style="background:var(--node-moved);border-color:var(--node-moved-border)"></span> moved to a different bucket</div>
+        </div>
+
+        <div class="fig">
+            <svg viewBox="0 0 900 300" xmlns="http://www.w3.org/2000/svg">
+                <text x="10" y="24" fill="#8b97a6" font-family="monospace" font-size="13">old map (size 4)</text>
+                <g>
+                    <rect x="10" y="40" width="40" height="30" rx="6" fill="#1b2129" stroke="#262e38"/>
+                    <text x="30" y="60" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">[3]</text>
+                    <line x1="50" y1="55" x2="75" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="77" y="42" width="48" height="26" rx="5" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="101" y="59" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="8">HEAD</text>
+                    <line x1="125" y1="55" x2="150" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="152" y="40" width="60" height="30" rx="6" fill="#4a3a1e" stroke="#d9a94f" stroke-width="2"/>
+                    <text x="182" y="59" text-anchor="middle" fill="#f0dcb0" font-family="monospace" font-size="9">"city"</text>
+                    <line x1="212" y1="55" x2="237" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="239" y="40" width="58" height="30" rx="6" fill="#4a3a1e" stroke="#d9a94f" stroke-width="2"/>
+                    <text x="268" y="59" text-anchor="middle" fill="#f0dcb0" font-family="monospace" font-size="9">"age"</text>
+                    <line x1="297" y1="55" x2="322" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="324" y="40" width="62" height="30" rx="6" fill="#4a3a1e" stroke="#d9a94f" stroke-width="2"/>
+                    <text x="355" y="59" text-anchor="middle" fill="#f0dcb0" font-family="monospace" font-size="9">"name"</text>
+                    <line x1="386" y1="55" x2="411" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="413" y="40" width="50" height="30" rx="6" fill="#4a3a1e" stroke="#d9a94f" stroke-width="2"/>
+                    <text x="438" y="59" text-anchor="middle" fill="#f0dcb0" font-family="monospace" font-size="9">"id"</text>
+                    <line x1="463" y1="55" x2="488" y2="55" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="490" y="42" width="48" height="26" rx="5" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="514" y="59" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="8">TAIL</text>
+                </g>
+                <text x="270" y="95" fill="#5b6b7c" font-family="monospace" font-size="11" text-anchor="middle">all 4 nodes re-bucketed against newSize=8 ↓</text>
+
+                <!-- arrows down -->
+                <line x1="182" y1="105" x2="182" y2="160" stroke="#5b6b7c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#a8)"/>
+                <line x1="268" y1="105" x2="360" y2="160" stroke="#d9a94f" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#a8y)"/>
+                <line x1="355" y1="105" x2="182" y2="160" stroke="#5b6b7c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#a8)"/>
+                <line x1="438" y1="105" x2="182" y2="160" stroke="#5b6b7c" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#a8)"/>
+
+                <text x="10" y="150" fill="#8b97a6" font-family="monospace" font-size="13">new map (size 8)</text>
+
+                <!-- new bucket 3 -->
+                <g>
+                    <rect x="10" y="165" width="40" height="30" rx="6" fill="#1b2129" stroke="#262e38"/>
+                    <text x="30" y="185" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">[3]</text>
+                    <line x1="50" y1="180" x2="75" y2="180" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="77" y="167" width="48" height="26" rx="5" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="101" y="184" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="8">HEAD</text>
+                    <line x1="125" y1="180" x2="150" y2="180" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="152" y="165" width="50" height="30" rx="6" fill="#4a3a1e" stroke="#d9a94f" stroke-width="2"/>
+                    <text x="177" y="184" text-anchor="middle" fill="#f0dcb0" font-family="monospace" font-size="9">"id"</text>
+                    <text x="177" y="196" text-anchor="middle" fill="#8b97a6" font-family="monospace" font-size="7">inserted last→closest to HEAD</text>
+                    <line x1="202" y1="180" x2="227" y2="180" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="229" y="165" width="60" height="30" rx="6" fill="#1e3a4a" stroke="#4fb3d9" stroke-width="1.5"/>
+                    <text x="259" y="184" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">"name"</text>
+                    <line x1="289" y1="180" x2="314" y2="180" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="316" y="165" width="58" height="30" rx="6" fill="#1e3a4a" stroke="#4fb3d9" stroke-width="1.5"/>
+                    <text x="345" y="184" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="9">"city"</text>
+                    <line x1="374" y1="180" x2="399" y2="180" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="401" y="167" width="48" height="26" rx="5" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="425" y="184" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="8">TAIL</text>
+                </g>
+
+                <!-- new bucket 7 -->
+                <g>
+                    <rect x="10" y="230" width="40" height="30" rx="6" fill="#1b2129" stroke="#262e38"/>
+                    <text x="30" y="250" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="11">[7]</text>
+                    <line x1="50" y1="245" x2="75" y2="245" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="77" y="232" width="48" height="26" rx="5" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="101" y="249" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="8">HEAD</text>
+                    <line x1="125" y1="245" x2="150" y2="245" stroke="#d9a94f" stroke-width="2" marker-end="url(#a8y)"/>
+                    <rect x="152" y="230" width="58" height="30" rx="6" fill="#4a3a1e" stroke="#d9a94f" stroke-width="2.5"/>
+                    <text x="181" y="249" text-anchor="middle" fill="#f0dcb0" font-family="monospace" font-size="9">"age"</text>
+                    <line x1="210" y1="245" x2="235" y2="245" stroke="#5b6b7c" stroke-width="1.5" marker-end="url(#a8)"/>
+                    <rect x="237" y="232" width="48" height="26" rx="5" fill="#3a4552" stroke="#5b6b7c"/>
+                    <text x="261" y="249" text-anchor="middle" fill="#dbe2ea" font-family="monospace" font-size="8">TAIL</text>
+                    <text x="330" y="249" fill="#d9a94f" font-family="monospace" font-size="12">alone now — the chain</text>
+                    <text x="330" y="264" fill="#d9a94f" font-family="monospace" font-size="12">that was length 4 just split</text>
+                </g>
+
+                <defs>
+                    <marker id="a8" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#5b6b7c"/></marker>
+                    <marker id="a8y" markerWidth="8" markerHeight="8" refX="6" refY="3" orient="auto"><path d="M0,0 L6,3 L0,6 Z" fill="#d9a94f"/></marker>
+                </defs>
+            </svg>
+            <div class="fig-caption">4-node chain in old bucket[3] → split into new bucket[3] (3 nodes) + new bucket[7] (1 node)</div>
+        </div>
+
+        <h3>Iteration order inside rehash's while loop</h3>
+        <p>One subtlety worth tracing carefully: <code>nextNode = curr.next</code> is saved
+            <em>before</em> <code>curr</code> gets relinked into the new map. This is essential — once
+            <code>curr.next</code> is overwritten to point into <code>newMap</code>, the old chain would
+            otherwise be lost mid-walk.</p>
+
+        <div class="code-block"><span class="kw">while</span>(curr != <span class="kw">null</span>){
+            <span class="kw">if</span>(curr.key == <span class="kw">null</span>){ curr = curr.next; <span class="kw">continue</span>; }
+            <span class="kw">int</span> bucket = Math.abs(curr.key.hashCode()) % newSize;
+            <span class="type">Node</span> newHead = newMap[bucket];
+            <span class="type">Node</span> oldFirst = newHead.next;
+            <span class="type">Node</span> nextNode = curr.next;   <span class="cm">// ← saved BEFORE curr.next is reassigned</span>
+            newHead.next = curr;   curr.prev = newHead;
+            curr.next = oldFirst;  oldFirst.prev = curr;
+            curr = nextNode;                <span class="cm">// ← walk continues using the saved pointer</span>
+            }</div>
+
+        <div class="callout info">
+            <span class="tag">Why the final chain order flips</span>
+            <p>
+                The old bucket 3 chain was <code>city → age → name → id</code> (id inserted most
+                recently, closest to old HEAD). Walking it left-to-right and always inserting each node
+                "closest to new HEAD" means the <em>last</em> one walked ends up <em>first</em> in the
+                new bucket — hence new bucket 3 reads <code>id → name → city</code>, the reverse of the
+                old bucket's real-node order.
+            </p>
+        </div>
+    </section>
+
+    <!-- ================= SECTION 7: ISSUES ================= -->
+    <section id="issues">
+        <div class="section-label">07 · Review</div>
+        <h2>A few things worth double-checking in this code</h2>
+        <p>These aren't part of "how it works" — they're spots where the current code may not do what
+            you intend. Flagging them since you're clearly iterating on this as a learning project.</p>
+
+        <div class="callout danger">
+            <span class="tag">Raw types everywhere</span>
+            <p>
+                <code>Node</code> is used unparameterized in most methods (<code>Node node =
+                findNode(key)</code>, <code>Node[] map</code>, <code>Node head = map[bucket]</code>)
+                instead of <code>Node&lt;K,V&gt;</code>. This compiles with unchecked-warning noise and
+                throws away compile-time type safety — the compiler can no longer catch a
+                <code>String</code> being put where an <code>Integer</code> was expected, for instance.
+            </p>
+        </div>
+
+        <div class="callout danger">
+            <span class="tag">get()'s unchecked cast</span>
+            <p>
+                <code>return node == null ? null : (V)node.val;</code> — since <code>node</code> is a raw
+                <code>Node</code>, <code>node.val</code> is typed as <code>Object</code>, so this cast is
+                unchecked and will compile with a warning. It'll work at runtime here since
+                <code>val</code> really was stored as <code>V</code>, but the compiler can't verify it.
+            </p>
+        </div>
+
+        <div class="callout">
+            <span class="tag">TAIL is included in the linear scan</span>
+            <p>
+                <code>findNode</code>'s <code>while(head != null)</code> will walk as far as the TAIL
+                sentinel (key is null, so it's skipped by the guard) and then stop only because
+                <code>TAIL.next</code> is Java's default <code>null</code> for an unassigned field. It
+                works, but it's relying on TAIL.next never being explicitly set rather than an explicit
+                "stop at tail" check — worth a comment so a future reader doesn't "fix" it by pointing
+                TAIL.next somewhere.
+            </p>
+        </div>
+
+        <div class="callout">
+            <span class="tag">@Setter on Node is unused, and slightly risky</span>
+            <p>
+                Lombok's <code>@Getter @Setter</code> generates public setters for <code>key</code>,
+                <code>val</code>, <code>next</code>, <code>prev</code> — but the class also has hand-written
+                field access everywhere (<code>node.val = value</code> works either way since these are
+                package-private fields accessed from the same file). The setters aren't harmful, just
+                redundant here, and they do make it possible for outside code to reach in and corrupt the
+                linked-list pointers directly.
+            </p>
+        </div>
+
+        <div class="callout">
+            <span class="tag">No null-key handling</span>
+            <p>
+                <code>put</code>, <code>get</code>, <code>remove</code>, and <code>findNode</code> all
+                call <code>key.hashCode()</code> or <code>key.equals(...)</code> directly. A
+                <code>null</code> key passed by a caller throws <code>NullPointerException</code> rather
+                than being handled — which may be fine depending on your requirements, but is worth being
+                a deliberate choice rather than an accident, especially since <code>null</code> is already
+                the sentinel marker used internally for HEAD/TAIL.
+            </p>
+        </div>
+    </section>
+
+    <footer>
+        CustomHashMap visual trace · generated from the source you provided · every bucket index and hashCode() value on this page is a real computed value, not illustrative
+    </footer>
+
+</div>
+</body>
+</html>
